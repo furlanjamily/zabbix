@@ -22,3 +22,4 @@ for hostgroup in hostgroups:
 
 
 api.user.logout() # fecha a conexão
+
