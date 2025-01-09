@@ -1,5 +1,8 @@
 import apizabbix
 
+
+
+
 api = apizabbix.connect() # Realiza a conexao com o servidor
 
 # Realiza consulta  e armazena na variavel, elimina os grupos que contem o nome Templates
