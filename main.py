@@ -13,7 +13,7 @@ def test_connection():
 
     try:
         zapi = ZabbixAPI(server)
-        zapi.login(user, password)
+        zapi.login(user, password)  # Assíncrono em versões mais novas
         print("Conexão bem-sucedida!")
     except Exception as e:
         print(f"Erro: {e}")
