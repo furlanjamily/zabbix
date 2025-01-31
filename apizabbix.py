@@ -5,11 +5,11 @@ import json
 app = Flask(__name__)
 
 # Permitir CORS para uma origem específica (localhost:3000)
-CORS(app, resources={r"/api/*": {"origins": "http://localhost:3000"}})
+CORS(app, resources={r"/api/*": {"origins": "http://localhost:5173"}})
 
 @app.route('/api/hostgroups', methods=['GET'])
 def get_hostgroups():
-    # Aqui você implementa a lógica para retornar os dados do Zabbix
+    # Aqui você implementa a lógica para retornaar os dados do Zabbix
     try:
         # Realizando a consulta ao Zabbix
         from pyzabbix import ZabbixAPI
