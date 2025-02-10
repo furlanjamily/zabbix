@@ -1,6 +1,7 @@
 from flask import Flask, jsonify, make_response
 from flask_cors import CORS
 import json
+import configparser  # Adicionando a importação do configparser
 
 app = Flask(__name__)
 
@@ -13,7 +14,7 @@ def get_hostgroups():
     try:
         # Realizando a consulta ao Zabbix
         from pyzabbix import ZabbixAPI
-        config = configparser.ConfigParser()
+        config = configparser.ConfigParser()  # Usando o configparser para ler o arquivo de configuração
         config.read("config.ini")
         user = config.get('zabbix', 'user')
         password = config.get('zabbix', 'password')
