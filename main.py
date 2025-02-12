@@ -1,76 +1,79 @@
-from flask import Flask, jsonify, make_response
+from flask import Flask, jsonify
 from flask_cors import CORS
-from pyzabbix import ZabbixAPI
-from ping3 import ping
-import configparser
-import time
-from flask_limiter import Limiter
+import requests
+import asyncio
+import aioping
 
-# Inicializa a aplicação Flask
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": "http://localhost:5173"}})
+CORS(app)
 
-# Configuração do Limiter
-limiter = Limiter(app)
+ZABBIX_URL = "https://nocadm.quintadabaroneza.com.br/api_jsonrpc.php"
+ZABBIX_USER = "api"
+ZABBIX_PASSWORD = "123mudar@"
 
-# Função para conectar ao Zabbix
-def connect_zabbix():
-    config = configparser.ConfigParser()
-    config.read("config.ini")
-    user = config.get('zabbix', 'user')
-    password = config.get('zabbix', 'password')
-    server = config.get('zabbix', 'server')
+# Número máximo de pings simultâneos
+MAX_CONCURRENT_PINGS = 10
 
-    print(f"🔌 Conectando ao Zabbix em {server}...")
-    zapi = ZabbixAPI(server)
-    zapi.login(user, password)
-    return zapi
-
-# Função para processar os dados da API
-def processa_dados_api(hostgroups):
-    for hostgroup in hostgroups:
-        print(f"🖥️ Grupo: {hostgroup['name']}")
-        for host in hostgroup.get('hosts', []):
-            print(f"   - Host: {host['name']} ({host['host']})")
-
-# Limita o número de requisições para 15 por minuto
-@app.route('/api/hostgroups', methods=['GET'])
-@limiter.limit("15 per minute")  # Limita a 15 requisições por minuto
-def get_hostgroups():
-    start_time = time.time()
+def get_auth_token():
+    payload = {
+        "jsonrpc": "2.0",
+        "method": "user.login",
+        "params": {"user": ZABBIX_USER, "password": ZABBIX_PASSWORD},
+        "id": 1,
+        "auth": None
+    }
+    headers = {"Content-Type": "application/json"}
     try:
-        zapi = connect_zabbix()
+        response = requests.post(ZABBIX_URL, json=payload, headers=headers, verify=False)
+        response.raise_for_status()
+        return response.json().get("result")
+    except requests.exceptions.RequestException as e:
+        print(f"Erro na autenticação: {e}")
+        return None
 
-        print("📡 Buscando grupos de hosts...")
-        hostgroups = zapi.hostgroup.get(
-            output=['groupid', 'name'],
-            excludeSearch=True,
-            search={'name': 'Templates'},
-            selectHosts=['hostid', 'name', 'host']
-        )
+def get_hosts(auth_token):
+    payload = {
+        "jsonrpc": "2.0",
+        "method": "host.get",
+        "params": {"output": ["host"], "selectInterfaces": ["ip"]},
+        "auth": auth_token,
+        "id": 2
+    }
+    headers = {"Content-Type": "application/json"}
+    try:
+        response = requests.post(ZABBIX_URL, json=payload, headers=headers, verify=False)
+        response.raise_for_status()
+        return response.json().get("result", [])
+    except requests.exceptions.RequestException as e:
+        print(f"Erro ao obter hosts: {e}")
+        return []
 
-        if not hostgroups:
-            print("⚠️ Nenhum grupo encontrado.")
-            return jsonify([])
+async def check_host_status(ip, semaphore):
+    async with semaphore:  # Limita a quantidade de tarefas simultâneas
+        try:
+            await aioping.ping(ip, timeout=1)  # Timeout de 1s
+            return {"ip": ip, "status": "Online"}
+        except TimeoutError:
+            return {"ip": ip, "status": "Offline"}
+        except Exception as e:
+            return {"ip": ip, "status": f"Erro ({e})"}
 
-        print(f"✅ {len(hostgroups)} grupos encontrados.")
+async def check_all_hosts(ips):
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT_PINGS)  # Controla o número de pings simultâneos
+    tasks = [check_host_status(ip, semaphore) for ip in ips]
+    return await asyncio.gather(*tasks)
 
-        # Remover o ping para melhorar a performance
-        # Você pode reintroduzi-lo de forma assíncrona ou em uma segunda chamada, se necessário
+@app.route("/api/hosts", methods=["GET"])
+def api_hosts():
+    auth_token = get_auth_token()
+    if not auth_token:
+        return jsonify({"error": "Falha na autenticação do Zabbix"}), 500
 
-        # Processa os dados coletados
-        processa_dados_api(hostgroups)
+    hosts = get_hosts(auth_token)
+    ips = list(set(host.get("interfaces", [{}])[0].get("ip") for host in hosts if host.get("interfaces")))
 
-        zapi.user.logout()
-        execution_time = time.time() - start_time
-        print(f"✅ Resposta gerada em {execution_time:.2f} segundos.")
+    results = asyncio.run(check_all_hosts(ips))  # Executa os pings em paralelo, controlado pela semaphore
+    return jsonify(results)
 
-        return jsonify(hostgroups)
-
-    except Exception as e:
-        print(f"❌ Erro no servidor: {str(e)}")
-        return make_response(jsonify({"error": str(e)}), 500)
-
-# Rodar o servidor
 if __name__ == "__main__":
-    app.run(debug=True, host="127.0.0.1", port=5000)
+    app.run(debug=True, host="0.0.0.0", port=5000)
