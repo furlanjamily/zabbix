@@ -11,7 +11,6 @@ ZABBIX_URL = "https://nocadm.quintadabaroneza.com.br/api_jsonrpc.php"
 ZABBIX_USER = "api"
 ZABBIX_PASSWORD = "123mudar@"
 
-# Número máximo de pings simultâneos
 MAX_CONCURRENT_PINGS = 10
 
 def get_auth_token():
@@ -35,7 +34,11 @@ def get_hosts(auth_token):
     payload = {
         "jsonrpc": "2.0",
         "method": "host.get",
-        "params": {"output": ["host"], "selectInterfaces": ["ip"]},
+        "params": {
+            "output": ["host", "name"],
+            "selectInterfaces": ["ip"],
+            "selectGroups": ["name"]
+        },
         "auth": auth_token,
         "id": 2
     }
@@ -49,9 +52,9 @@ def get_hosts(auth_token):
         return []
 
 async def check_host_status(ip, semaphore):
-    async with semaphore:  # Limita a quantidade de tarefas simultâneas
+    async with semaphore:
         try:
-            await aioping.ping(ip, timeout=1)  # Timeout de 1s
+            await aioping.ping(ip, timeout=1)
             return {"ip": ip, "status": "Online"}
         except TimeoutError:
             return {"ip": ip, "status": "Offline"}
@@ -59,7 +62,7 @@ async def check_host_status(ip, semaphore):
             return {"ip": ip, "status": f"Erro ({e})"}
 
 async def check_all_hosts(ips):
-    semaphore = asyncio.Semaphore(MAX_CONCURRENT_PINGS)  # Controla o número de pings simultâneos
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT_PINGS)
     tasks = [check_host_status(ip, semaphore) for ip in ips]
     return await asyncio.gather(*tasks)
 
@@ -70,10 +73,27 @@ def api_hosts():
         return jsonify({"error": "Falha na autenticação do Zabbix"}), 500
 
     hosts = get_hosts(auth_token)
-    ips = list(set(host.get("interfaces", [{}])[0].get("ip") for host in hosts if host.get("interfaces")))
+    ips = {host["interfaces"][0]["ip"] for host in hosts if "interfaces" in host and host["interfaces"]}
+    results = asyncio.run(check_all_hosts(list(ips)))
 
-    results = asyncio.run(check_all_hosts(ips))  # Executa os pings em paralelo, controlado pela semaphore
-    return jsonify(results)
+    grouped_hosts = {}
+    for host in hosts:
+        hostgroups = host.get("groups", [])
+        ip = host["interfaces"][0]["ip"] if "interfaces" in host and host["interfaces"] else ""
+        status = next((result["status"] for result in results if result["ip"] == ip), "Offline")
+        
+        for group in hostgroups:
+            group_name = group.get("name", "Unknown Group")
+            if group_name not in grouped_hosts:
+                grouped_hosts[group_name] = []
+            grouped_hosts[group_name].append({
+                "host": host["host"],
+                "name": host.get("name", "Unknown"),
+                "ip": ip,
+                "status": status
+            })
+
+    return jsonify(grouped_hosts)
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=5000)
