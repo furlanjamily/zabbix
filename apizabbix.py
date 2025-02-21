@@ -1,79 +1,81 @@
-from flask import Flask, request, jsonify
-from pyzabbix import ZabbixAPI
-import configparser
-import json
-from datetime import datetime
-import time
+from flask import Flask, jsonify
+from flask_cors import CORS
+import requests
 
 app = Flask(__name__)
+CORS(app)
 
-# Função que realiza a conexão e autenticação no servidor Zabbix
-def connect():
-    config = configparser.ConfigParser()
-    config.read("config.ini")  # pega os dados de acesso do arquivo config.ini
+ZABBIX_URL = "https://nocadm.quintadabaroneza.com.br/api_jsonrpc.php"
+ZABBIX_USER = "api"
+ZABBIX_PASSWORD = "123mudar@"
 
-    user = config.get('zabbix', 'user')
-    password = config.get('zabbix', 'password')
-    server = config.get('zabbix', 'server')
-
-    zapi = ZabbixAPI(server)
-    zapi.login(user, password)
-
-    return zapi
-
-# Inicializa a conexão global
-zapi = connect()
-
-# Endpoint para consultar histórico
-@app.route('/api/zabbix/history', methods=['POST'])
-def get_history():
+def get_auth_token():
+    """Autentica no Zabbix e retorna o token"""
+    payload = {
+        "jsonrpc": "2.0",
+        "method": "user.login",
+        "params": {"user": ZABBIX_USER, "password": ZABBIX_PASSWORD},
+        "id": 1,
+        "auth": None
+    }
+    headers = {"Content-Type": "application/json"}
     try:
-        # Dados do cliente
-        data = request.json
-        item_id = data.get('item_id')
-        time_from = data.get('time_from')
-        time_till = data.get('time_till')
+        response = requests.post(ZABBIX_URL, json=payload, headers=headers, verify=False)
+        response.raise_for_status()
+        return response.json().get("result")
+    except requests.exceptions.RequestException as e:
+        print(f"Erro na autenticação: {e}")
+        return None
 
-        # Validação básica
-        if not item_id or not time_from or not time_till:
-            return jsonify({"error": "Parâmetros inválidos"}), 400
+def get_hosts(auth_token):
+    """Obtém os hosts e seus status diretamente da API do Zabbix"""
+    payload = {
+        "jsonrpc": "2.0",
+        "method": "host.get",
+        "params": {
+            "output": ["host", "name", "status"],
+            "selectInterfaces": ["ip"],
+            "selectGroups": ["name"]
+        },
+        "auth": auth_token,
+        "id": 2
+    }
+    headers = {"Content-Type": "application/json"}
+    try:
+        response = requests.post(ZABBIX_URL, json=payload, headers=headers, verify=False)
+        response.raise_for_status()
+        return response.json().get("result", [])
+    except requests.exceptions.RequestException as e:
+        print(f"Erro ao obter hosts: {e}")
+        return []
 
-        # Consulta histórico
-        history = consulta_historico_item(time_from, time_till, item_id, zapi)
+@app.route("/api/hosts", methods=["GET"])
+def api_hosts():
+    """Endpoint para retornar os hosts e seus status"""
+    auth_token = get_auth_token()
+    if not auth_token:
+        return jsonify({"error": "Falha na autenticação do Zabbix"}), 500
 
-        # Processa os dados para JSON
-        processed_history = []
-        for point in history:
-            valor, unidade = converte_mb(point["value"])
-            processed_history.append({
-                "timestamp": datetime.fromtimestamp(int(point["clock"])).strftime("%Y-%m-%d %H:%M:%S"),
-                "value": round(valor, 2),
-                "unit": unidade
+    hosts = get_hosts(auth_token)
+
+    grouped_hosts = {}
+    for host in hosts:
+        hostgroups = host.get("groups", [])
+        ip = host["interfaces"][0]["ip"] if "interfaces" in host and host["interfaces"] else ""
+        status = "Online" if host["status"] == "0" else "Offline"
+
+        for group in hostgroups:
+            group_name = group.get("name", "Unknown Group")
+            if group_name not in grouped_hosts:
+                grouped_hosts[group_name] = []
+            grouped_hosts[group_name].append({
+                "host": host["host"],
+                "name": host.get("name", "Unknown"),
+                "ip": ip,
+                "status": status
             })
 
-        return jsonify(processed_history)
+    return jsonify(grouped_hosts)
 
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# Consulta histórico de dados do Zabbix
-def consulta_historico_item(time_from, time_till, itemid, api):
-    history = api.history.get(
-        itemids=itemid,
-        time_from=int(time_from),
-        time_till=int(time_till),
-        output="extend",
-        limit="5000",
-    )
-    return history
-
-# Converte valores para MB
-def converte_mb(valor):
-    valor = int(valor)
-    unidade = "Mb"
-    valor = valor / 1000 / 1000
-    return valor, unidade
-
-# Iniciar o servidor Flask
-if __name__ == '__main__':
-    app.run(debug=True)
+if __name__ == "__main__":
+    app.run(debug=True, host="0.0.0.0", port=5000)
