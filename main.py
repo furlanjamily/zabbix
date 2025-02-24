@@ -6,7 +6,8 @@ import asyncio
 app = Flask(__name__)
 
 # Permite requisições de uma origem específica
-CORS(app, resources={r"/api/*": {"origins": "https://monitoramento-baroneza.vercel.app"}})
+CORS(app)
+
 
 # Configurações do Zabbix
 ZABBIX_URL = "https://nocadm.quintadabaroneza.com.br/api_jsonrpc.php"
