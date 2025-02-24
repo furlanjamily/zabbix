@@ -2,7 +2,7 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 import requests
 import asyncio
-import aioping
+import socket
 
 app = Flask(__name__)
 
@@ -12,9 +12,10 @@ ZABBIX_URL = "https://nocadm.quintadabaroneza.com.br/api_jsonrpc.php"
 ZABBIX_USER = "api"
 ZABBIX_PASSWORD = "123mudar@"
 
-MAX_CONCURRENT_PINGS = 10
+MAX_CONCURRENT_CHECKS = 10  # Limite de conexões simultâneas
 
 def get_auth_token():
+    """Autentica no Zabbix e retorna o token"""
     payload = {
         "jsonrpc": "2.0",
         "method": "user.login",
@@ -32,6 +33,7 @@ def get_auth_token():
         return None
 
 def get_hosts(auth_token):
+    """Obtém os hosts e seus status diretamente da API do Zabbix"""
     payload = {
         "jsonrpc": "2.0",
         "method": "host.get",
@@ -52,29 +54,37 @@ def get_hosts(auth_token):
         print(f"Erro ao obter hosts: {e}")
         return []
 
-async def check_host_status(ip, semaphore):
-    async with semaphore:
-        try:
-            await aioping.ping(ip, timeout=1)
-            return {"ip": ip, "status": "Online"}
-        except TimeoutError:
-            return {"ip": ip, "status": "Offline"}
-        except Exception as e:
-            return {"ip": ip, "status": f"Erro ({e})"}
+async def check_host_status(ip, port=80, timeout=1):
+    """Tenta conectar ao host via TCP na porta especificada"""
+    try:
+        reader, writer = await asyncio.open_connection(ip, port)
+        writer.close()
+        await writer.wait_closed()
+        return {"ip": ip, "status": "Online"}
+    except Exception:
+        return {"ip": ip, "status": "Offline"}
 
 async def check_all_hosts(ips):
-    semaphore = asyncio.Semaphore(MAX_CONCURRENT_PINGS)
-    tasks = [check_host_status(ip, semaphore) for ip in ips]
+    """Verifica a conectividade de todos os hosts em paralelo"""
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT_CHECKS)
+    
+    async def limited_check(ip):
+        async with semaphore:
+            return await check_host_status(ip, port=80)  # Porta 80 (HTTP)
+
+    tasks = [limited_check(ip) for ip in ips]
     return await asyncio.gather(*tasks)
 
 @app.route("/api/hosts", methods=["GET"])
 def api_hosts():
+    """Endpoint para retornar os hosts e seus status"""
     auth_token = get_auth_token()
     if not auth_token:
         return jsonify({"error": "Falha na autenticação do Zabbix"}), 500
 
     hosts = get_hosts(auth_token)
     ips = {host["interfaces"][0]["ip"] for host in hosts if "interfaces" in host and host["interfaces"]}
+    
     results = asyncio.run(check_all_hosts(list(ips)))
 
     grouped_hosts = {}
