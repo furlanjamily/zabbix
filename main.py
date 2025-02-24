@@ -5,7 +5,8 @@ import asyncio
 import aioping
 
 app = Flask(__name__)
-CORS(app)
+
+CORS(app, resources={r"/api/*": {"origins": "https://monitoramento-baroneza.vercel.app"}})
 
 ZABBIX_URL = "https://nocadm.quintadabaroneza.com.br/api_jsonrpc.php"
 ZABBIX_USER = "api"
