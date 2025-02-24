@@ -1,18 +1,19 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 import requests
 import asyncio
 
 app = Flask(__name__)
 
+# Permite requisições de uma origem específica
 CORS(app, resources={r"/api/*": {"origins": "https://monitoramento-baroneza.vercel.app"}})
 
+# Configurações do Zabbix
 ZABBIX_URL = "https://nocadm.quintadabaroneza.com.br/api_jsonrpc.php"
 ZABBIX_USER = "api"
 ZABBIX_PASSWORD = "123mudar@"
 
 MAX_CONCURRENT_CHECKS = 10  # Limite de conexões simultâneas
-
 
 def get_auth_token():
     """Autentica no Zabbix e retorna o token"""
@@ -31,7 +32,6 @@ def get_auth_token():
     except requests.exceptions.RequestException as e:
         print(f"Erro na autenticação: {e}")
         return None
-
 
 def get_hosts(auth_token):
     """Obtém os hosts e seus status diretamente da API do Zabbix"""
@@ -55,7 +55,6 @@ def get_hosts(auth_token):
         print(f"Erro ao obter hosts: {e}")
         return []
 
-
 async def check_host_status(ip, port=80):
     """Tenta conectar ao host via TCP na porta especificada"""
     try:
@@ -65,7 +64,6 @@ async def check_host_status(ip, port=80):
         return {"ip": ip, "status": "Online"}
     except Exception:
         return {"ip": ip, "status": "Offline"}
-
 
 async def check_all_hosts(ips):
     """Verifica a conectividade de todos os hosts em paralelo"""
@@ -78,20 +76,27 @@ async def check_all_hosts(ips):
     tasks = [limited_check(ip) for ip in ips]
     return await asyncio.gather(*tasks)
 
-
 @app.route("/api/hosts", methods=["GET"])
 def api_hosts():
-    """Endpoint para retornar os hosts e seus status"""
+    """Endpoint para retornar os hosts e seus status com paginação"""
+    # Obter parâmetros de página e limite
+    page = int(request.args.get('page', 1))  # Página atual
+    limit = int(request.args.get('limit', 10))  # Número de hosts por página
+    
     auth_token = get_auth_token()
     if not auth_token:
         return jsonify({"error": "Falha na autenticação do Zabbix"}), 500
 
     hosts = get_hosts(auth_token)
-
     if not hosts:
         return jsonify({"error": "Nenhum host encontrado"}), 500
 
-    ips = {host["interfaces"][0]["ip"] for host in hosts if "interfaces" in host and host["interfaces"]}
+    # Paginação: obter somente os hosts da página solicitada
+    start = (page - 1) * limit
+    end = start + limit
+    paginated_hosts = hosts[start:end]
+
+    ips = {host["interfaces"][0]["ip"] for host in paginated_hosts if "interfaces" in host and host["interfaces"]}
 
     # Correção: Usar asyncio.create_task() para rodar a verificação assíncrona sem travar Flask
     loop = asyncio.new_event_loop()
@@ -100,7 +105,7 @@ def api_hosts():
 
     grouped_hosts = {}
 
-    for host in hosts:
+    for host in paginated_hosts:
         hostgroups = host.get("groups", [])
         ip = host["interfaces"][0]["ip"] if "interfaces" in host and host["interfaces"] else ""
         status = next((result["status"] for result in results if result["ip"] == ip), "Offline")
@@ -117,7 +122,6 @@ def api_hosts():
             })
 
     return jsonify(grouped_hosts)
-
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=5000)
