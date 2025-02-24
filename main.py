@@ -2,7 +2,6 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 import requests
 import asyncio
-import socket
 
 app = Flask(__name__)
 
@@ -13,6 +12,7 @@ ZABBIX_USER = "api"
 ZABBIX_PASSWORD = "123mudar@"
 
 MAX_CONCURRENT_CHECKS = 10  # Limite de conexões simultâneas
+
 
 def get_auth_token():
     """Autentica no Zabbix e retorna o token"""
@@ -31,6 +31,7 @@ def get_auth_token():
     except requests.exceptions.RequestException as e:
         print(f"Erro na autenticação: {e}")
         return None
+
 
 def get_hosts(auth_token):
     """Obtém os hosts e seus status diretamente da API do Zabbix"""
@@ -54,7 +55,8 @@ def get_hosts(auth_token):
         print(f"Erro ao obter hosts: {e}")
         return []
 
-async def check_host_status(ip, port=80, timeout=1):
+
+async def check_host_status(ip, port=80):
     """Tenta conectar ao host via TCP na porta especificada"""
     try:
         reader, writer = await asyncio.open_connection(ip, port)
@@ -64,16 +66,18 @@ async def check_host_status(ip, port=80, timeout=1):
     except Exception:
         return {"ip": ip, "status": "Offline"}
 
+
 async def check_all_hosts(ips):
     """Verifica a conectividade de todos os hosts em paralelo"""
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_CHECKS)
-    
+
     async def limited_check(ip):
         async with semaphore:
-            return await check_host_status(ip, port=80)  # Porta 80 (HTTP)
+            return await check_host_status(ip, port=80)
 
     tasks = [limited_check(ip) for ip in ips]
     return await asyncio.gather(*tasks)
+
 
 @app.route("/api/hosts", methods=["GET"])
 def api_hosts():
@@ -83,16 +87,24 @@ def api_hosts():
         return jsonify({"error": "Falha na autenticação do Zabbix"}), 500
 
     hosts = get_hosts(auth_token)
+
+    if not hosts:
+        return jsonify({"error": "Nenhum host encontrado"}), 500
+
     ips = {host["interfaces"][0]["ip"] for host in hosts if "interfaces" in host and host["interfaces"]}
-    
-    results = asyncio.run(check_all_hosts(list(ips)))
+
+    # Correção: Usar asyncio.create_task() para rodar a verificação assíncrona sem travar Flask
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    results = loop.run_until_complete(check_all_hosts(list(ips)))
 
     grouped_hosts = {}
+
     for host in hosts:
         hostgroups = host.get("groups", [])
         ip = host["interfaces"][0]["ip"] if "interfaces" in host and host["interfaces"] else ""
         status = next((result["status"] for result in results if result["ip"] == ip), "Offline")
-        
+
         for group in hostgroups:
             group_name = group.get("name", "Unknown Group")
             if group_name not in grouped_hosts:
@@ -105,6 +117,7 @@ def api_hosts():
             })
 
     return jsonify(grouped_hosts)
+
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=5000)
