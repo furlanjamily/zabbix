@@ -16,6 +16,8 @@ ZABBIX_PASSWORD = "123mudar@"  # ⚠️ Armazene credenciais com segurança.
 
 MAX_CONCURRENT_CHECKS = 10  # Limite de conexões simultâneas
 
+MAX_THREADS = 10  # Limite de threads para paralelizar o ping
+
 def get_auth_token():
     """Autentica no Zabbix e retorna o token"""
     payload = {
@@ -105,7 +107,7 @@ def api_hosts():
     for host in paginated_hosts:
         hostgroups = host.get("groups", [])
         ip = host["interfaces"][0]["ip"] if "interfaces" in host and host["interfaces"] else ""
-        status = check_host_status(ip)
+        status = status_dict.get(ip, "Offline")
 
         for group in hostgroups:
             group_name = group.get("name", "Unknown Group")
@@ -123,5 +125,4 @@ def api_hosts():
     return jsonify(grouped_hosts)
 
 if __name__ == "__main__":
-    warnings.simplefilter("ignore")  # Oculta avisos de SSL sem verificação
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    warnings.simplefilter("ignore")  # Oculta aviso
