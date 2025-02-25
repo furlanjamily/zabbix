@@ -7,7 +7,7 @@ import time
 import warnings
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 ZABBIX_URL = "https://nocadm.quintadabaroneza.com.br/api_jsonrpc.php"
 ZABBIX_USER = "api"
