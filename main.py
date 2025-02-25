@@ -27,7 +27,7 @@ def get_auth_token():
     }
     headers = {"Content-Type": "application/json"}
     try:
-        response = requests.post(ZABBIX_URL, json=payload, headers=headers, verify=False)
+        response = requests.post(ZABBIX_URL, json=payload, headers=headers, verify=False, timeout=5)
         response.raise_for_status()
         return response.json().get("result")
     except requests.exceptions.RequestException as e:
@@ -49,7 +49,7 @@ def get_hosts(auth_token):
     }
     headers = {"Content-Type": "application/json"}
     try:
-        response = requests.post(ZABBIX_URL, json=payload, headers=headers, verify=False)
+        response = requests.post(ZABBIX_URL, json=payload, headers=headers, verify=False, timeout=5)
         response.raise_for_status()
         return response.json().get("result", [])
     except requests.exceptions.RequestException as e:
@@ -121,6 +121,8 @@ def api_hosts():
                 "ip": ip,
                 "status": status
             })
+
+    cached_data = {"timestamp": time.time(), "data": grouped_hosts}
 
     return jsonify(grouped_hosts)
 
