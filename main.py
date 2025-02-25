@@ -4,19 +4,21 @@ import requests
 import asyncio
 import aioping
 import time
+import warnings
 
 app = Flask(__name__)
 CORS(app)
 
 ZABBIX_URL = "https://nocadm.quintadabaroneza.com.br/api_jsonrpc.php"
 ZABBIX_USER = "api"
-ZABBIX_PASSWORD = "123mudar@"
+ZABBIX_PASSWORD = "123mudar@"  # ⚠️ Lembre-se de armazenar credenciais com segurança.
 
 MAX_CONCURRENT_PINGS = 20
 CACHE_TIMEOUT = 30  # Cache de 30 segundos
 cached_data = {"timestamp": 0, "data": {}}
 
 def get_auth_token():
+    """Obtém o token de autenticação do Zabbix."""
     payload = {
         "jsonrpc": "2.0",
         "method": "user.login",
@@ -34,6 +36,7 @@ def get_auth_token():
         return None
 
 def get_hosts(auth_token):
+    """Obtém a lista de hosts cadastrados no Zabbix."""
     payload = {
         "jsonrpc": "2.0",
         "method": "host.get",
@@ -55,6 +58,7 @@ def get_hosts(auth_token):
         return []
 
 async def check_host_status(ip, semaphore):
+    """Verifica o status de um host via ping."""
     async with semaphore:
         try:
             await aioping.ping(ip, timeout=1)
@@ -65,13 +69,17 @@ async def check_host_status(ip, semaphore):
             return {"ip": ip, "status": f"Erro ({e})"}
 
 async def check_all_hosts(ips):
+    """Executa verificações de ping assíncronas em vários hosts."""
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_PINGS)
     tasks = [check_host_status(ip, semaphore) for ip in ips]
     return await asyncio.gather(*tasks)
 
 @app.route("/api/hosts", methods=["GET"])
 def api_hosts():
+    """Endpoint que retorna o status dos hosts do Zabbix."""
     global cached_data
+
+    # Verifica se os dados no cache ainda são válidos
     if time.time() - cached_data["timestamp"] < CACHE_TIMEOUT:
         return jsonify(cached_data["data"])
 
@@ -82,7 +90,11 @@ def api_hosts():
     hosts = get_hosts(auth_token)
     ips = {host["interfaces"][0]["ip"] for host in hosts if "interfaces" in host and host["interfaces"]}
 
-    results = asyncio.run(check_all_hosts(list(ips)))
+    # Evita conflito de loop de eventos
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    results = loop.run_until_complete(check_all_hosts(list(ips)))
+    loop.close()
 
     grouped_hosts = {}
     for host in hosts:
@@ -106,4 +118,5 @@ def api_hosts():
     return jsonify(grouped_hosts)
 
 if __name__ == "__main__":
+    warnings.simplefilter("ignore")  # Oculta avisos de SSL sem verificação
     app.run(debug=True, host="0.0.0.0", port=5000)
