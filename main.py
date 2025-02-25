@@ -12,18 +12,14 @@ CORS(app)
 # Configurações do Zabbix
 ZABBIX_URL = "https://nocadm.quintadabaroneza.com.br/api_jsonrpc.php"
 ZABBIX_USER = "api"
-ZABBIX_PASSWORD = "123mudar@"
+ZABBIX_PASSWORD = "123mudar@"  # ⚠️ Lembre-se de armazenar credenciais com segurança.
 
 MAX_CONCURRENT_CHECKS = 10  # Limite de conexões simultâneas
 
 def get_auth_token():
     """Autentica no Zabbix e retorna o token"""
     payload = {
-        "jsonrpc": "2.0",
         "method": "user.login",
-        "params": {"user": ZABBIX_USER, "password": ZABBIX_PASSWORD},
-        "id": 1,
-        "auth": None
     }
     headers = {"Content-Type": "application/json"}
     try:
@@ -127,4 +123,5 @@ def api_hosts():
     return jsonify(grouped_hosts)
 
 if __name__ == "__main__":
+    warnings.simplefilter("ignore")  # Oculta avisos de SSL sem verificação
     app.run(debug=True, host="0.0.0.0", port=5000)
