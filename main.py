@@ -3,6 +3,7 @@ from flask_cors import CORS
 import requests
 import asyncio
 import aioping
+import time
 
 app = Flask(__name__)
 CORS(app)
@@ -11,7 +12,9 @@ ZABBIX_URL = "https://nocadm.quintadabaroneza.com.br/api_jsonrpc.php"
 ZABBIX_USER = "api"
 ZABBIX_PASSWORD = "123mudar@"
 
-MAX_CONCURRENT_PINGS = 10
+MAX_CONCURRENT_PINGS = 20
+CACHE_TIMEOUT = 30  # Cache de 30 segundos
+cached_data = {"timestamp": 0, "data": {}}
 
 def get_auth_token():
     payload = {
@@ -23,7 +26,7 @@ def get_auth_token():
     }
     headers = {"Content-Type": "application/json"}
     try:
-        response = requests.post(ZABBIX_URL, json=payload, headers=headers, verify=False)
+        response = requests.post(ZABBIX_URL, json=payload, headers=headers, verify=False, timeout=5)
         response.raise_for_status()
         return response.json().get("result")
     except requests.exceptions.RequestException as e:
@@ -44,7 +47,7 @@ def get_hosts(auth_token):
     }
     headers = {"Content-Type": "application/json"}
     try:
-        response = requests.post(ZABBIX_URL, json=payload, headers=headers, verify=False)
+        response = requests.post(ZABBIX_URL, json=payload, headers=headers, verify=False, timeout=5)
         response.raise_for_status()
         return response.json().get("result", [])
     except requests.exceptions.RequestException as e:
@@ -68,12 +71,17 @@ async def check_all_hosts(ips):
 
 @app.route("/api/hosts", methods=["GET"])
 def api_hosts():
+    global cached_data
+    if time.time() - cached_data["timestamp"] < CACHE_TIMEOUT:
+        return jsonify(cached_data["data"])
+
     auth_token = get_auth_token()
     if not auth_token:
         return jsonify({"error": "Falha na autenticação do Zabbix"}), 500
 
     hosts = get_hosts(auth_token)
     ips = {host["interfaces"][0]["ip"] for host in hosts if "interfaces" in host and host["interfaces"]}
+
     results = asyncio.run(check_all_hosts(list(ips)))
 
     grouped_hosts = {}
@@ -81,7 +89,7 @@ def api_hosts():
         hostgroups = host.get("groups", [])
         ip = host["interfaces"][0]["ip"] if "interfaces" in host and host["interfaces"] else ""
         status = next((result["status"] for result in results if result["ip"] == ip), "Offline")
-        
+
         for group in hostgroups:
             group_name = group.get("name", "Unknown Group")
             if group_name not in grouped_hosts:
@@ -92,6 +100,8 @@ def api_hosts():
                 "ip": ip,
                 "status": status
             })
+
+    cached_data = {"timestamp": time.time(), "data": grouped_hosts}
 
     return jsonify(grouped_hosts)
 
