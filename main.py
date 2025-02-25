@@ -1,8 +1,7 @@
 from flask import Flask, jsonify
 from flask_cors import CORS
 import requests
-import asyncio
-import aioping
+import socket
 import time
 import warnings
 
@@ -11,9 +10,8 @@ CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 ZABBIX_URL = "https://nocadm.quintadabaroneza.com.br/api_jsonrpc.php"
 ZABBIX_USER = "api"
-ZABBIX_PASSWORD = "123mudar@"  # ⚠️ Lembre-se de armazenar credenciais com segurança.
+ZABBIX_PASSWORD = "123mudar@"  # ⚠️ Armazene credenciais com segurança.
 
-MAX_CONCURRENT_PINGS = 20
 CACHE_TIMEOUT = 30  # Cache de 30 segundos
 cached_data = {"timestamp": 0, "data": {}}
 
@@ -57,22 +55,13 @@ def get_hosts(auth_token):
         print(f"Erro ao obter hosts: {e}")
         return []
 
-async def check_host_status(ip, semaphore):
-    """Verifica o status de um host via ping."""
-    async with semaphore:
-        try:
-            await aioping.ping(ip, timeout=1)
-            return {"ip": ip, "status": "Online"}
-        except TimeoutError:
-            return {"ip": ip, "status": "Offline"}
-        except Exception as e:
-            return {"ip": ip, "status": f"Erro ({e})"}
-
-async def check_all_hosts(ips):
-    """Executa verificações de ping assíncronas em vários hosts."""
-    semaphore = asyncio.Semaphore(MAX_CONCURRENT_PINGS)
-    tasks = [check_host_status(ip, semaphore) for ip in ips]
-    return await asyncio.gather(*tasks)
+def check_host_status(ip, port=80, timeout=2):
+    """Verifica a conectividade de um host usando socket."""
+    try:
+        socket.create_connection((ip, port), timeout)
+        return "Online"
+    except (socket.timeout, socket.error):
+        return "Offline"
 
 @app.route("/api/hosts", methods=["GET"])
 def api_hosts():
@@ -88,19 +77,12 @@ def api_hosts():
         return jsonify({"error": "Falha na autenticação do Zabbix"}), 500
 
     hosts = get_hosts(auth_token)
-    ips = {host["interfaces"][0]["ip"] for host in hosts if "interfaces" in host and host["interfaces"]}
-
-    # Evita conflito de loop de eventos
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    results = loop.run_until_complete(check_all_hosts(list(ips)))
-    loop.close()
-
     grouped_hosts = {}
+
     for host in hosts:
         hostgroups = host.get("groups", [])
         ip = host["interfaces"][0]["ip"] if "interfaces" in host and host["interfaces"] else ""
-        status = next((result["status"] for result in results if result["ip"] == ip), "Offline")
+        status = check_host_status(ip)
 
         for group in hostgroups:
             group_name = group.get("name", "Unknown Group")
