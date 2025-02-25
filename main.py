@@ -12,7 +12,7 @@ CORS(app)
 # Configurações do Zabbix
 ZABBIX_URL = "https://nocadm.quintadabaroneza.com.br/api_jsonrpc.php"
 ZABBIX_USER = "api"
-ZABBIX_PASSWORD = "123mudar@"  # ⚠️ Lembre-se de armazenar credenciais com segurança.
+ZABBIX_PASSWORD = "123mudar@"  # ⚠️ Armazene credenciais com segurança.
 
 MAX_CONCURRENT_CHECKS = 10  # Limite de conexões simultâneas
 
@@ -105,7 +105,7 @@ def api_hosts():
     for host in paginated_hosts:
         hostgroups = host.get("groups", [])
         ip = host["interfaces"][0]["ip"] if "interfaces" in host and host["interfaces"] else ""
-        status = next((result["status"] for result in results if result["ip"] == ip), "Offline")
+        status = check_host_status(ip)
 
         for group in hostgroups:
             group_name = group.get("name", "Unknown Group")
