@@ -4,6 +4,7 @@ import requests
 import socket
 import time
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
@@ -14,6 +15,8 @@ ZABBIX_PASSWORD = "123mudar@"  # ⚠️ Armazene credenciais com segurança.
 
 CACHE_TIMEOUT = 30  # Cache de 30 segundos
 cached_data = {"timestamp": 0, "data": {}}
+
+MAX_THREADS = 10  # Limite de threads para paralelizar o ping
 
 def get_auth_token():
     """Obtém o token de autenticação do Zabbix."""
@@ -59,9 +62,15 @@ def check_host_status(ip, port=80, timeout=2):
     """Verifica a conectividade de um host usando socket."""
     try:
         socket.create_connection((ip, port), timeout)
-        return "Online"
+        return ip, "Online"
     except (socket.timeout, socket.error):
-        return "Offline"
+        return ip, "Offline"
+
+def ping_hosts_in_parallel(ips):
+    """Executa pings em paralelo utilizando threads."""
+    with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
+        results = executor.map(check_host_status, ips)
+    return dict(results)
 
 @app.route("/api/hosts", methods=["GET"])
 def api_hosts():
@@ -77,12 +86,16 @@ def api_hosts():
         return jsonify({"error": "Falha na autenticação do Zabbix"}), 500
 
     hosts = get_hosts(auth_token)
-    grouped_hosts = {}
+    ips = [host["interfaces"][0]["ip"] for host in hosts if "interfaces" in host and host["interfaces"]]
 
+    # Verifica os status dos hosts em paralelo
+    status_dict = ping_hosts_in_parallel(ips)
+
+    grouped_hosts = {}
     for host in hosts:
         hostgroups = host.get("groups", [])
         ip = host["interfaces"][0]["ip"] if "interfaces" in host and host["interfaces"] else ""
-        status = check_host_status(ip)
+        status = status_dict.get(ip, "Offline")
 
         for group in hostgroups:
             group_name = group.get("name", "Unknown Group")
@@ -100,5 +113,4 @@ def api_hosts():
     return jsonify(grouped_hosts)
 
 if __name__ == "__main__":
-    warnings.simplefilter("ignore")  # Oculta avisos de SSL sem verificação
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    warnings.simplefilter("ignore")  # Oculta aviso
