@@ -12,7 +12,7 @@ CORS(app)
 # Configurações do Zabbix
 ZABBIX_URL = "https://nocadm.quintadabaroneza.com.br/api_jsonrpc.php"
 ZABBIX_USER = "api"
-ZABBIX_PASSWORD = "123mudar@"  # ⚠️ Armazene credenciais com segurança.
+ZABBIX_PASSWORD = "123mudar@"  
 
 MAX_CONCURRENT_CHECKS = 10  # Limite de conexões simultâneas
 
