@@ -11,12 +11,8 @@ CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 ZABBIX_URL = "https://nocadm.quintadabaroneza.com.br/api_jsonrpc.php"
 ZABBIX_USER = "api"
-ZABBIX_PASSWORD = "123mudar@"  # ⚠️ Armazene credenciais com segurança.
+ZABBIX_PASSWORD = "123mudar@"  
 
-CACHE_TIMEOUT = 30  # Cache de 30 segundos
-cached_data = {"timestamp": 0, "data": {}}
-
-MAX_THREADS = 10  # Limite de threads para paralelizar o ping
 
 def get_auth_token():
     """Obtém o token de autenticação do Zabbix."""
