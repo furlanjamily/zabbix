@@ -26,12 +26,12 @@ import os
 import time
 import requests
 import asyncio
-from ping3 import ping, verbose_ping
+from ping3 import ping
 from flask import Flask, jsonify
 from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app)
+CORS(app)  # Permitir acesso de outros domínios
 
 # Configurações do Zabbix
 ZABBIX_URL = os.getenv("ZABBIX_URL", "http://nocadm.quintadabaroneza.com.br/api_jsonrpc.php")
@@ -39,7 +39,7 @@ ZABBIX_USER = os.getenv("ZABBIX_USER", "api")
 ZABBIX_PASSWORD = os.getenv("ZABBIX_PASSWORD", "123mudar@")
 
 # Cache para armazenar os dados temporariamente
-cached_data = {"timestamp": 0, "data": {}}
+cached_data = {"timestamp": 0, "data": []}
 CACHE_TIMEOUT = 60  # Tempo de cache em segundos
 
 def get_zabbix_token():
@@ -59,7 +59,7 @@ def get_zabbix_token():
     }
     response = requests.post(ZABBIX_URL, json=payload)
     data = response.json()
-    
+
     if "result" in data:
         return data["result"]
     else:
@@ -89,11 +89,8 @@ def get_hosts_from_zabbix():
 async def check_ping(host_ip):
     """Verifica o status de conectividade (ping) do host de forma assíncrona."""
     try:
-        response = await asyncio.to_thread(ping, host_ip, timeout=2)  # Usando asyncio para não bloquear
-        if response is not None:
-            return "online"
-        else:
-            return "offline"
+        response = await asyncio.to_thread(ping, host_ip, timeout=2)
+        return "online" if response is not None else "offline"
     except Exception as e:
         print(f"Erro ao verificar ping para {host_ip}: {e}")
         return "offline"
@@ -118,35 +115,42 @@ async def get_hostgroups_from_zabbix():
         response = requests.post(ZABBIX_URL, json=payload)
         data = response.json()
 
-        if "result" in data:
-            hostgroups = []
-            tasks = []
-            for group in data["result"]:
-                group_hosts = []
-                for host in group["hosts"]:
-                    ip = host["interfaces"][0]["ip"] if host["interfaces"] else "Desconhecido"
-                    task = asyncio.create_task(check_ping(ip))
-                    group_hosts.append({
-                        "hostid": host["hostid"],
-                        "name": host["name"],
-                        "host": host["host"],
-                        "ip": ip,
-                        "status": task  # Status assíncrono
-                    })
-                hostgroups.append({
-                    "hostgroupid": group["groupid"],
-                    "name": group["name"],
-                    "hosts": group_hosts
+        if "result" not in data:
+            raise Exception(f"Erro ao buscar grupos de hosts: {data}")
+
+        hostgroups = []
+        tasks = []
+
+        for group in data["result"]:
+            group_hosts = []
+            for host in group["hosts"]:
+                ip = host["interfaces"][0]["ip"] if host["interfaces"] else "Desconhecido"
+                tasks.append(check_ping(ip))  # Adiciona a tarefa de ping
+                group_hosts.append({
+                    "hostid": host["hostid"],
+                    "name": host["name"],
+                    "host": host["host"],
+                    "ip": ip
                 })
 
-            # Aguardando todas as tarefas de ping
-            for group in hostgroups:
-                for host in group["hosts"]:
-                    host["status"] = await host["status"]
-            
-            return hostgroups
-        else:
-            raise Exception(f"Erro ao buscar grupos de hosts: {data}")
+            hostgroups.append({
+                "hostgroupid": group["groupid"],
+                "name": group["name"],
+                "hosts": group_hosts
+            })
+
+        # Executa todas as tarefas de ping simultaneamente
+        ping_results = await asyncio.gather(*tasks)
+
+        # Atribui os resultados do ping aos hosts
+        index = 0
+        for group in hostgroups:
+            for host in group["hosts"]:
+                host["status"] = ping_results[index]
+                index += 1
+
+        return hostgroups
+
     except Exception as e:
         print(f"Erro ao obter grupos de hosts do Zabbix: {e}")
         return []
