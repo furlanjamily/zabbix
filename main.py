@@ -1,6 +1,8 @@
 import os
 import time
 import requests
+import asyncio
+from ping3 import ping, verbose_ping
 from flask import Flask, jsonify
 from flask_cors import CORS
 
@@ -36,61 +38,91 @@ def get_zabbix_token():
     else:
         raise Exception(f"Erro ao autenticar no Zabbix: {data}")
 
-def get_hosts_from_zabbix():
-    """Consulta a API do Zabbix para obter os hosts monitorados."""
+async def check_ping(host_ip):
+    """Verifica o status de conectividade (ping) do host de forma assíncrona."""
+    try:
+        response = await asyncio.to_thread(ping, host_ip, timeout=2)  # Usando asyncio para não bloquear
+        if response is not None:
+            return "online"
+        else:
+            return "offline"
+    except Exception as e:
+        print(f"Erro ao verificar ping para {host_ip}: {e}")
+        return "offline"
+
+async def get_hostgroups_from_zabbix():
+    """Consulta a API do Zabbix para obter os grupos de hosts e seus hosts associados."""
     try:
         token = get_zabbix_token()
         
+        # Obtendo os grupos de hosts
         payload = {
             "jsonrpc": "2.0",
-            "method": "host.get",
+            "method": "hostgroup.get",
             "params": {
-                "output": ["hostid", "host", "name"],
-                "selectInterfaces": ["ip"]
+                "output": ["groupid", "name"],
+                "selectHosts": ["hostid", "name", "host", "interfaces"]
             },
             "id": 2,
             "auth": token
         }
         response = requests.post(ZABBIX_URL, json=payload)
         data = response.json()
-        
-        if "result" in data:
-            hosts = []
-            for host in data["result"]:
-                ip = host["interfaces"][0]["ip"] if host["interfaces"] else "Desconhecido"
-                hosts.append({
-                    "id": host["hostid"],
-                    "name": host["name"],
-                    "ip": ip,
-                    "status": "online"  # Para status real, precisaríamos consultar o ping
-                })
-            return hosts
-        else:
-            raise Exception(f"Erro ao buscar hosts: {data}")
 
+        if "result" in data:
+            hostgroups = []
+            tasks = []
+            for group in data["result"]:
+                group_hosts = []
+                for host in group["hosts"]:
+                    ip = host["interfaces"][0]["ip"] if host["interfaces"] else "Desconhecido"
+                    task = asyncio.create_task(check_ping(ip))
+                    group_hosts.append({
+                        "hostid": host["hostid"],
+                        "name": host["name"],
+                        "host": host["host"],
+                        "ip": ip,
+                        "status": task  # Status assíncrono
+                    })
+                hostgroups.append({
+                    "hostgroupid": group["groupid"],
+                    "name": group["name"],
+                    "hosts": group_hosts
+                })
+
+            # Aguardando todas as tarefas de ping
+            for group in hostgroups:
+                for host in group["hosts"]:
+                    host["status"] = await host["status"]
+            
+            return hostgroups
+        else:
+            raise Exception(f"Erro ao buscar grupos de hosts: {data}")
     except Exception as e:
-        print(f"Erro ao obter hosts do Zabbix: {e}")
+        print(f"Erro ao obter grupos de hosts do Zabbix: {e}")
         return []
 
-@app.route("/api/hosts", methods=["GET"])
-def api_hosts():
-    """Endpoint para listar os hosts monitorados pelo Zabbix."""
+@app.route("/api/hostgroups", methods=["GET"])
+def api_hostgroups():
+    """Endpoint para listar os grupos de hosts e seus hosts monitorados pelo Zabbix."""
     global cached_data  
 
     # Retorna do cache se ainda estiver válido
     if time.time() - cached_data["timestamp"] < CACHE_TIMEOUT:
         return jsonify(cached_data["data"])
 
-    # Obtém hosts do Zabbix
-    hosts = get_hosts_from_zabbix()
+    # Obtém hostgroups do Zabbix de forma assíncrona
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    hostgroups = loop.run_until_complete(get_hostgroups_from_zabbix())
 
     # Atualiza cache
     cached_data = {
         "timestamp": time.time(),
-        "data": hosts
+        "data": hostgroups
     }
 
-    return jsonify(hosts)
+    return jsonify(hostgroups)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000, debug=True)
