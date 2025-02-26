@@ -32,9 +32,9 @@ app = Flask(__name__)
 CORS(app)
 
 # Configurações do Zabbix
-ZABBIX_URL = os.getenv("ZABBIX_URL", "http://seu-zabbix.com/api_jsonrpc.php")
-ZABBIX_USER = os.getenv("ZABBIX_USER", "Admin")
-ZABBIX_PASSWORD = os.getenv("ZABBIX_PASSWORD", "zabbix")
+ZABBIX_URL = os.getenv("ZABBIX_URL", "http://nocadm.quintadabaroneza.com.br/api_jsonrpc.php")
+ZABBIX_USER = os.getenv("ZABBIX_USER", "api")
+ZABBIX_PASSWORD = os.getenv("ZABBIX_PASSWORD", "123mudar@")
 
 # Cache para armazenar os dados temporariamente
 cached_data = {"timestamp": 0, "data": {}}
