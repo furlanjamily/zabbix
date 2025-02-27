@@ -33,6 +33,8 @@ def get_zabbix_token():
     response = requests.post(ZABBIX_URL, json=payload)
     data = response.json()
 
+    print("🔑 Token recebido:", data)  # Debug
+
     if "result" in data:
         return data["result"]
     else:
@@ -44,14 +46,14 @@ async def check_ping(host_ip):
         response = await asyncio.to_thread(ping, host_ip, timeout=2)
         return "online" if response is not None else "offline"
     except Exception as e:
-        print(f"Erro ao verificar ping para {host_ip}: {e}")
+        print(f"⚠️ Erro ao verificar ping para {host_ip}: {e}")
         return "offline"
 
 async def get_hostgroups_from_zabbix():
     """Consulta a API do Zabbix para obter os grupos de hosts e seus hosts associados."""
     try:
         token = get_zabbix_token()
-        
+
         # Obtendo os grupos de hosts
         payload = {
             "jsonrpc": "2.0",
@@ -66,6 +68,8 @@ async def get_hostgroups_from_zabbix():
         response = requests.post(ZABBIX_URL, json=payload)
         data = response.json()
 
+        print("📡 Resposta do Zabbix:", data)  # Debug
+
         if "result" not in data:
             raise Exception(f"Erro ao buscar grupos de hosts: {data}")
 
@@ -75,7 +79,7 @@ async def get_hostgroups_from_zabbix():
         for group in data["result"]:
             group_hosts = []
             for host in group["hosts"]:
-                ip = host["interfaces"][0]["ip"] if host["interfaces"] else "Desconhecido"
+                ip = host["interfaces"][0].get("ip", "Desconhecido") if host.get("interfaces") else "Desconhecido"
                 tasks.append(check_ping(ip))  # Adiciona a tarefa de ping
                 group_hosts.append({
                     "hostid": host["hostid"],
@@ -103,7 +107,7 @@ async def get_hostgroups_from_zabbix():
         return hostgroups
 
     except Exception as e:
-        print(f"Erro ao obter grupos de hosts do Zabbix: {e}")
+        print(f"❌ Erro ao obter grupos de hosts do Zabbix: {e}")
         return []
 
 @app.route("/api/hostgroups", methods=["GET"])
