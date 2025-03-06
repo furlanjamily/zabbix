@@ -1,39 +1,20 @@
+from flask import Flask, jsonify
+from flask_cors import CORS
+from flask_socketio import SocketIO
 import os
 import time
 import requests
 import asyncio
 from ping3 import ping
-from flask import Flask, jsonify
-from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app)  # Permitir acesso de outros domínios
+CORS(app)
+socketio = SocketIO(app, cors_allowed_origins="*")  # Habilita WebSocket
 
 # Configurações do Zabbix
 ZABBIX_URL = os.getenv("ZABBIX_URL", "http://nocadm.quintadabaroneza.com.br/api_jsonrpc.php")
 ZABBIX_USER = os.getenv("ZABBIX_USER", "api")
 ZABBIX_PASSWORD = os.getenv("ZABBIX_PASSWORD", "123mudar@")
-
-# Cache para armazenar os dados temporariamente
-cached_data = {"timestamp": 0, "data": []}
-CACHE_TIMEOUT = 60  # Tempo de cache em segundos
-
-
-def get_zabbix_token():
-    """Autentica no Zabbix e retorna o token de sessão."""
-    payload = {
-        "jsonrpc": "2.0",
-        "method": "user.login",
-        "params": {"user": ZABBIX_USER, "password": ZABBIX_PASSWORD},
-        "id": 1,
-        "auth": None
-    }
-    response = requests.post(ZABBIX_URL, json=payload)
-    data = response.json()
-    if "result" in data:
-        return data["result"]
-    raise Exception(f"Erro ao autenticar no Zabbix: {data}")
-
 
 async def check_ping(host_ip):
     """Verifica o status de conectividade (ping) do host de forma assíncrona."""
@@ -44,9 +25,8 @@ async def check_ping(host_ip):
         print(f"⚠️ Erro ao verificar ping para {host_ip}: {e}")
         return "offline"
 
-
 async def get_hostgroups_from_zabbix():
-    """Consulta a API do Zabbix para obter os grupos de hosts e seus hosts associados."""
+    """Consulta a API do Zabbix e obtém os grupos de hosts com status atualizado."""
     try:
         token = get_zabbix_token()
         payload = {
@@ -100,19 +80,36 @@ async def get_hostgroups_from_zabbix():
         print(f"❌ Erro ao obter grupos de hosts do Zabbix: {e}")
         return []
 
+def get_zabbix_token():
+    """Autentica no Zabbix e retorna o token de sessão."""
+    payload = {
+        "jsonrpc": "2.0",
+        "method": "user.login",
+        "params": {"user": ZABBIX_USER, "password": ZABBIX_PASSWORD},
+        "id": 1,
+        "auth": None
+    }
+    response = requests.post(ZABBIX_URL, json=payload)
+    data = response.json()
+    if "result" in data:
+        return data["result"]
+    raise Exception(f"Erro ao autenticar no Zabbix: {data}")
 
-@app.route("/api/hostgroups", methods=["GET"])
-def api_hostgroups():
-    """Endpoint para listar os grupos de hosts e seus hosts monitorados pelo Zabbix."""
-    global cached_data  
-    if time.time() - cached_data["timestamp"] < CACHE_TIMEOUT:
-        return jsonify(cached_data["data"])
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    hostgroups = loop.run_until_complete(get_hostgroups_from_zabbix())
-    cached_data = {"timestamp": time.time(), "data": hostgroups}
-    return jsonify(hostgroups)
+@socketio.on("connect")
+def handle_connect():
+    print("Cliente conectado via WebSocket!")
 
+async def broadcast_data():
+    """Atualiza os dados a cada 10s e envia para os clientes via WebSocket."""
+    while True:
+        data = await get_hostgroups_from_zabbix()
+        socketio.emit("update_data", data)
+        await asyncio.sleep(10)
+
+# Inicia a atualização automática
+@socketio.on("start_monitoring")
+def start_monitoring():
+    asyncio.create_task(broadcast_data())
 
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    socketio.run(app, debug=True, host="0.0.0.0", port=5000)
