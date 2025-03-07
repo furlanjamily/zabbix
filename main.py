@@ -118,8 +118,11 @@ async def broadcast_data():
 def start_monitoring():
     """Inicia a transmissão contínua de dados para os clientes."""
     print("📡 Iniciando monitoramento dos hosts...")
-    asyncio.create_task(broadcast_data())
+    # Garantir que o loop de eventos esteja ativo para criar tarefas assíncronas
+    loop = asyncio.get_event_loop()
+    loop.create_task(broadcast_data())
 
 # 🔹 Executa a aplicação Flask com WebSockets
 if __name__ == "__main__":
+    # Usar o `gevent` para trabalhar com Flask + SocketIO de forma assíncrona
     socketio.run(app, debug=True, host="0.0.0.0", port=5000)
