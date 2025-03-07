@@ -1,10 +1,10 @@
+import threading
+import asyncio
 from flask import Flask
 from flask_cors import CORS
 from flask_socketio import SocketIO
 import os
-import time
 import requests
-import asyncio
 from ping3 import ping
 
 # 🔹 Configuração do Flask
