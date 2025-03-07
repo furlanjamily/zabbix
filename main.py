@@ -19,10 +19,10 @@ ZABBIX_URL = os.getenv("ZABBIX_URL", "http://nocadm.quintadabaroneza.com.br/api_
 ZABBIX_USER = os.getenv("ZABBIX_USER", "api")
 ZABBIX_PASSWORD = os.getenv("ZABBIX_PASSWORD", "123mudar@")
 
-async def check_ping(host_ip):
+def check_ping(host_ip):
     """Verifica se o host responde ao ping."""
     try:
-        response = await asyncio.to_thread(ping, host_ip, timeout=2)
+        response = ping(host_ip, timeout=2)
         return "online" if response is not None else "offline"
     except Exception as e:
         print(f"⚠️ Erro ao verificar ping para {host_ip}: {e}")
@@ -73,7 +73,7 @@ async def get_hostgroups_from_zabbix():
             group_hosts = []
             for host in group["hosts"]:
                 ip = host["interfaces"][0].get("ip", "Desconhecido") if host.get("interfaces") else "Desconhecido"
-                tasks.append(check_ping(ip))  # Adiciona a tarefa de ping
+                tasks.append(asyncio.to_thread(check_ping, ip))  # Adiciona a tarefa de ping
                 group_hosts.append({
                     "hostid": host["hostid"],
                     "name": host["name"],
