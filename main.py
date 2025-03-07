@@ -107,6 +107,13 @@ def handle_connect():
     """Evento chamado quando um cliente se conecta via WebSocket."""
     print("✅ Cliente conectado via WebSocket!")
 
+def start_asyncio_task():
+    """Inicia o loop de eventos do asyncio no contexto do Flask."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.create_task(broadcast_data())
+    loop.run_forever()
+
 async def broadcast_data():
     """Atualiza os dados a cada 10s e envia para os clientes via WebSocket."""
     while True:
@@ -118,11 +125,9 @@ async def broadcast_data():
 def start_monitoring():
     """Inicia a transmissão contínua de dados para os clientes."""
     print("📡 Iniciando monitoramento dos hosts...")
-    # Garantir que o loop de eventos esteja ativo para criar tarefas assíncronas
-    loop = asyncio.get_event_loop()
-    loop.create_task(broadcast_data())
+    # Inicia a tarefa assíncrona no novo evento de loop
+    threading.Thread(target=start_asyncio_task).start()
 
 # 🔹 Executa a aplicação Flask com WebSockets
 if __name__ == "__main__":
-    # Usar o `gevent` para trabalhar com Flask + SocketIO de forma assíncrona
     socketio.run(app, debug=True, host="0.0.0.0", port=5000)
